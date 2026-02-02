@@ -66,7 +66,11 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     report_path = Path(ns.report)
-    report_path.write_text(result.to_markdown(), encoding="utf-8")
+    try:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(result.to_markdown(), encoding="utf-8")
+    except OSError as e:
+        raise SystemExit(f"Failed to write report to {report_path}: {e}")
 
     # Print a tiny summary to stdout so CI logs show something useful.
     if result.ok:

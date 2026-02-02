@@ -9,7 +9,7 @@ description = "Tiny CLI to detect metric regressions between two AI experiment r
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Farhan", email = "" }]
+authors = [{ name = "Farhan" }]
 keywords = ["ai", "evaluation", "regression", "metrics", "testing"]
 classifiers = [
   "Development Status :: 3 - Alpha",

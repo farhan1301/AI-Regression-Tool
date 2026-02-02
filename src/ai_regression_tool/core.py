@@ -46,10 +46,23 @@ def load_metrics(path: str | Path) -> Dict[str, Number]:
     Expected format examples:
     - {"accuracy": 0.91, "latency_p95_ms": 1200}
     - {"metrics": {"accuracy": 0.91, ...}}  (we'll auto-unpack one level)
+
+    Raises:
+      ValueError with a human-readable message for common failure cases.
     """
 
     p = Path(path)
-    data: Any = json.loads(p.read_text(encoding="utf-8"))
+    try:
+        raw = p.read_text(encoding="utf-8")
+    except FileNotFoundError as e:
+        raise ValueError(f"Metrics file not found: {p}") from e
+    except OSError as e:
+        raise ValueError(f"Could not read metrics file: {p} ({e})") from e
+
+    try:
+        data: Any = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in metrics file: {p} (line {e.lineno}, col {e.colno})") from e
 
     if isinstance(data, dict) and "metrics" in data and isinstance(data["metrics"], dict):
         data = data["metrics"]
