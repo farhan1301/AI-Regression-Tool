@@ -40,7 +40,7 @@ class RegressionResult:
         return "\n".join(lines).strip() + "\n"
 
 
-def load_metrics(path: str | Path) -> Dict[str, Number]:
+def load_metrics(path: str | Path, *, fmt: str = "auto") -> Dict[str, Number]:
     """Load a flat dict of numeric metrics from a JSON file.
 
     Expected format examples:
@@ -63,6 +63,13 @@ def load_metrics(path: str | Path) -> Dict[str, Number]:
         data: Any = json.loads(raw)
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON in metrics file: {p} (line {e.lineno}, col {e.colno})") from e
+
+    # Optional format adapters
+    fmt_norm = (fmt or "auto").strip().lower()
+    if fmt_norm in ("langsmith", "ls"):
+        from .langsmith import extract_langsmith_metrics
+
+        data = extract_langsmith_metrics(data)
 
     if isinstance(data, dict) and "metrics" in data and isinstance(data["metrics"], dict):
         data = data["metrics"]

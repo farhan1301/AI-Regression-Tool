@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .config import load_config
 from .core import compare_metrics, load_metrics
 
 
@@ -15,6 +16,19 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
     p.add_argument("baseline", help="Path to baseline metrics JSON")
     p.add_argument("candidate", help="Path to candidate metrics JSON")
+
+    p.add_argument(
+        "--format",
+        default="auto",
+        choices=["auto", "flat", "langsmith"],
+        help="Input format (default: auto). Use 'langsmith' for LangSmith exports.",
+    )
+
+    p.add_argument(
+        "--config",
+        default=None,
+        help="Path to ai-regression.yml (default: use ./ai-regression.yml if present)",
+    )
 
     p.add_argument(
         "--lower-is-better",
@@ -50,19 +64,71 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     ns = _parse_args(sys.argv[1:] if argv is None else argv)
 
-    baseline = load_metrics(ns.baseline)
-    candidate = load_metrics(ns.candidate)
+    cfg = load_config(ns.config)
 
-    # Build a lower-is-better set by substring matching.
-    lib_substrings = [s.strip() for s in str(ns.lower_is_better).split(",") if s.strip()]
-    lower_is_better = {k for k in set(baseline.keys()) & set(candidate.keys()) if any(s in k.lower() for s in lib_substrings)}
+    baseline = load_metrics(ns.baseline, fmt=ns.format)
+    candidate = load_metrics(ns.candidate, fmt=ns.format)
 
-    result = compare_metrics(
-        baseline,
-        candidate,
-        lower_is_better=lower_is_better,
-        min_delta=float(ns.min_delta),
-        fail_if_regression=not bool(ns.no_fail),
+    # Decide per-metric direction using config rules.
+    rules_by_key = {r.key: r for r in cfg.metrics}
+    overlap = set(baseline.keys()) & set(candidate.keys())
+
+    # If config keys are "short" (e.g. groundedness) and inputs are dotted paths,
+    # allow suffix match. This makes LangSmith flattening usable without perfect mapping.
+    def match_rule(metric_key: str):
+        if metric_key in rules_by_key:
+            return rules_by_key[metric_key]
+        for k, r in rules_by_key.items():
+            if metric_key.lower().endswith(k.lower()):
+                return r
+        return None
+
+    lower_is_better = set()
+    min_delta = float(ns.min_delta)
+    fail_if_regression = not bool(ns.no_fail)
+
+    # Apply per-metric thresholds by folding them into min_delta at compare-time.
+    # For now, we use the max(abs_threshold, pct_threshold * |baseline|).
+    # We compute a per-metric delta and do classification here.
+    regressions = {}
+    improvements = {}
+    unchanged = {}
+
+    for key in sorted(overlap):
+        b = float(baseline[key])
+        c = float(candidate[key])
+        delta = c - b
+
+        rule = match_rule(key)
+        direction = (rule.direction if rule else None) or ("lower" if any(s in key.lower() for s in str(ns.lower_is_better).split(",")) else "higher")
+        severity = (rule.severity if rule else "fail")
+        threshold = 0.0
+        if rule:
+            threshold = max(float(rule.abs_threshold), abs(b) * float(rule.pct_threshold))
+        threshold = max(threshold, min_delta)
+
+        if direction == "lower":
+            good = delta < -threshold
+            bad = delta > threshold
+        else:
+            good = delta > threshold
+            bad = delta < -threshold
+
+        if bad:
+            regressions[key] = (delta, severity)
+        elif good:
+            improvements[key] = delta
+        else:
+            unchanged[key] = delta
+
+    # Build core RegressionResult for markdown + exit code
+    from .core import RegressionResult
+
+    result = RegressionResult(
+        ok=(not any(sev == "fail" for _, sev in regressions.values())) if fail_if_regression else True,
+        regressions={k: d for k, (d, _) in regressions.items()},
+        improvements=improvements,
+        unchanged=unchanged,
     )
 
     report_path = Path(ns.report)
@@ -73,6 +139,17 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(f"Failed to write report to {report_path}: {e}")
 
     # Print a tiny summary to stdout so CI logs show something useful.
+    # GitHub Actions summary support
+    try:
+        import os
+
+        summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary_path:
+            Path(summary_path).write_text(result.to_markdown(), encoding="utf-8")
+    except OSError:
+        # If we can't write the summary, don't fail the whole run.
+        pass
+
     if result.ok:
         print(f"OK: {len(result.improvements)} improvements, {len(result.regressions)} regressions (report: {report_path})")
         raise SystemExit(0)
