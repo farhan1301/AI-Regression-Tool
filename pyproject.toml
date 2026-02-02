@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.24.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ai-regression-tool"
+version = "0.1.1"
+description = "CLI to detect metric regressions between two AI evaluation runs (JSON/LangSmith)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Farhan" }]
+keywords = ["ai", "evaluation", "regression", "metrics", "testing", "langsmith", "rag"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+]
+
+dependencies = ["PyYAML>=6.0.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+
+[project.scripts]
+ai-regression = "ai_regression_tool.cli:main"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-q"
+testpaths = ["tests"]
